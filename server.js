@@ -1,75 +1,100 @@
 const express = require('express');
-const fs = require('fs');
-const cors = require('cors');
 const bodyParser = require('body-parser');
+const jwt = require('jsonwebtoken');
+const paypal = require('@paypal/checkout-server-sdk');
+const path = require('path');
+
 const app = express();
+const PORT = 3000;
+const users = {};
+const secret = 'supersecret'; // JWT secret
 
-const USERS_FILE = 'users.json';
-app.use(cors());
+// PayPal setup
+const Environment = paypal.core.LiveEnvironment; 
+const paypalClient = new paypal.core.PayPalHttpClient(
+  new Environment(
+    'AcKNQugfH6LQ7ApKcATgXGjvRcnZgCwg17pJeHVI4Iu2RXLzDrl5c7q22zYY-sVtr417SPImLGCjnqYN', 
+    'EAbCP8nqoRoS6YDEF2yXUwG_qS9_jG23_5j1RJbpWjZjzIcTP8x1nXzNUjIN2HwyPNaNMDZ0B7mIRaBm' 
+  )
+);
+
 app.use(bodyParser.json());
-app.use(express.static('.'));
+app.use(express.static('public'));
 
-function readUsers() {
-  return JSON.parse(fs.existsSync(USERS_FILE) ? fs.readFileSync(USERS_FILE) : '[]');
-}
-
-function writeUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
-
-app.post('/register', (req, res) => {
-  const { email, phone, password } = req.body;
-  const users = readUsers();
-
-  if (users.find(u => u.email === email)) {
-    return res.status(400).json({ message: 'User already exists' });
+// Middleware to verify token
+function authenticate(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'Unauthorized' });
+  try {
+    const user = jwt.verify(token, secret);
+    req.user = user;
+    next();
+  } catch {
+    res.status(403).json({ message: 'Invalid token' });
   }
+}
 
-  users.push({ email, phone, password, techcoins: 0, lastSurvey: 0 });
-  writeUsers(users);
-  res.json({ message: 'Registered successfully' });
+app.post('/signup', (req, res) => {
+  const { email, password } = req.body;
+  if (users[email]) return res.json({ message: 'Already registered' });
+  users[email] = { password, balance: 0, lastSurvey: 0 };
+  res.json({ message: 'Signup successful' });
 });
 
 app.post('/login', (req, res) => {
   const { email, password } = req.body;
-  const users = readUsers();
-  const user = users.find(u => u.email === email && u.password === password);
-
-  if (!user) return res.json({ message: 'Invalid login' });
-  res.json({ user });
+  if (!users[email] || users[email].password !== password) return res.json({ message: 'Invalid credentials' });
+  const token = jwt.sign({ email }, secret);
+  res.json({ token });
 });
 
-app.post('/survey', (req, res) => {
-  const { email } = req.body;
-  const users = readUsers();
-  const user = users.find(u => u.email === email);
+app.get('/balance', authenticate, (req, res) => {
+  res.json({ balance: users[req.user.email].balance });
+});
+
+app.get('/survey', authenticate, (req, res) => {
+  const user = users[req.user.email];
   const now = Date.now();
-
-  if (!user) return res.json({ message: 'User not found' });
-
   if (now - user.lastSurvey < 3600000) {
-    return res.json({ message: 'Please wait 1 hour between surveys' });
+    return res.json({ message: 'Come back in 1 hour!' });
   }
-
-  user.techcoins += 20 * 10; // 20 questions x 10 techcoins
+  user.balance += 10;
   user.lastSurvey = now;
-  writeUsers(users);
-  res.json({ message: 'Survey submitted!', techcoins: user.techcoins });
+  res.json({ questions: [
+    'What is your name?', 'What country are you in?', 'Your birth date?', 'Do you use PayPal?',
+    'How much money do you make monthly?', 'What device do you use?', 'Do you play games?', 'Which bank do you use?',
+    'Would you use TechCoin again?', 'Rate this platform out of 10?'
+  ]});
 });
 
-app.post('/withdraw', (req, res) => {
-  const { email } = req.body;
-  const users = readUsers();
-  const user = users.find(u => u.email === email);
+app.post('/withdraw', authenticate, async (req, res) => {
+  const user = users[req.user.email];
+  if (user.balance < 10) return res.json({ message: 'Not enough TechCoins' });
 
-  if (!user || user.techcoins < 1) {
-    return res.json({ message: 'Not enough TechCoins' });
+  user.balance -= 10;
+
+  // Placeholder PayPal payout
+  const request = new paypal.payouts.PayoutsPostRequest();
+  request.requestBody({
+    sender_batch_header: {
+      sender_batch_id: 'batch_' + Date.now(),
+      email_subject: 'You have a TechCoin payment!'
+    },
+    items: [{
+      recipient_type: 'EMAIL',
+      amount: { value: '1.00', currency: 'USD' },
+      receiver: req.user.email,
+      note: 'Thanks for using TechCoin!',
+      sender_item_id: 'item_1'
+    }]
+  });
+
+  try {
+    const response = await paypalClient.execute(request);
+    res.json({ message: 'Withdrawal processed!' });
+  } catch (e) {
+    res.json({ message: 'Error with PayPal payout' });
   }
-
-  // Fake withdrawal
-  res.json({ message: `Withdrawal request received for ${user.techcoins} TechCoins` });
-  user.techcoins = 0;
-  writeUsers(users);
 });
 
-app.listen(3000, () => console.log('Server running on http://localhost:3000'));
+app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
