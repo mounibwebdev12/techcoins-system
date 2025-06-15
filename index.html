@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TechCoins Survey App</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 600px; margin: 2rem auto; padding: 1rem; }
+  input, button, select { margin: 0.3rem 0; padding: 0.5rem; width: 100%; }
+  .hidden { display: none; }
+  #balance { font-weight: bold; margin-top: 1rem; }
+  #message { margin: 1rem 0; color: green; }
+  #error { margin: 1rem 0; color: red; }
+</style>
+</head>
+<body>
+
+<h1>TechCoins Survey App</h1>
+
+<div id="auth-section">
+  <h2>Signup</h2>
+  <input id="signup-email" type="email" placeholder="Email" />
+  <input id="signup-phone" type="text" placeholder="Phone" />
+  <input id="signup-password" type="password" placeholder="Password" />
+  <input id="signup-firstname" type="text" placeholder="First Name" />
+  <input id="signup-lastname" type="text" placeholder="Last Name" />
+  <input id="signup-birthday" type="date" />
+  <input id="signup-country" type="text" placeholder="Country" />
+  <input id="signup-state" type="text" placeholder="State" />
+  <button id="signup-btn">Sign Up</button>
+
+  <h2>Login</h2>
+  <input id="login-email" type="email" placeholder="Email" />
+  <input id="login-password" type="password" placeholder="Password" />
+  <button id="login-btn">Log In</button>
+</div>
+
+<div id="user-section" class="hidden">
+  <p>Welcome, <span id="user-name"></span>! <button id="logout-btn">Log Out</button></p>
+  <p>Your TechCoins Balance: <span id="balance">0</span></p>
+
+  <h3>Survey</h3>
+  <p>Please answer this question to earn 10 TechCoins.</p>
+  <p>How do you like our app?</p>
+  <select id="survey-answer">
+    <option value="">-- Select --</option>
+    <option value="love it">Love it</option>
+    <option value="it's ok">It's OK</option>
+    <option value="not good">Not good</option>
+  </select>
+  <button id="submit-survey-btn">Submit Survey</button>
+
+  <h3>Withdraw TechCoins</h3>
+  <p>Minimum 50 TechCoins required to withdraw.</p>
+  <input id="withdraw-amount" type="number" placeholder="Amount to withdraw" />
+  <input id="withdraw-paypal" type="email" placeholder="Your PayPal email" />
+  <button id="withdraw-btn">Withdraw</button>
+
+  <p id="message"></p>
+  <p id="error"></p>
+</div>
+
+<script>
+  const API_BASE = 'http://localhost:3000'; // Change if backend on another address
+
+  let token = null;
+
+  function showMessage(msg) {
+    document.getElementById('message').textContent = msg;
+    document.getElementById('error').textContent = '';
+  }
+  function showError(msg) {
+    document.getElementById('error').textContent = msg;
+    document.getElementById('message').textContent = '';
+  }
+
+  function saveToken(t) {
+    token = t;
+    localStorage.setItem('token', t);
+  }
+  function loadToken() {
+    const t = localStorage.getItem('token');
+    if(t) token = t;
+    return t;
+  }
+  function clearToken() {
+    token = null;
+    localStorage.removeItem('token');
+  }
+
+  async function apiFetch(path, options = {}) {
+    if (!options.headers) options.headers = {};
+    if (token) options.headers['Authorization'] = token;
+    const res = await fetch(API_BASE + path, options);
+    if (res.status === 401 || res.status === 403) {
+      logout();
+      throw new Error('Unauthorized. Please login again.');
+    }
+    return res.json();
+  }
+
+  async function signup() {
+    const email = document.getElementById('signup-email').value.trim();
+    const phone = document.getElementById('signup-phone').value.trim();
+    const password = document.getElementById('signup-password').value;
+    const firstname = document.getElementById('signup-firstname').value.trim();
+    const lastname = document.getElementById('signup-lastname').value.trim();
+    const birthday = document.getElementById('signup-birthday').value;
+    const country = document.getElementById('signup-country').value.trim();
+    const state = document.getElementById('signup-state').value.trim();
+
+    if(!email || !phone || !password) return showError('Email, phone and password are required.');
+
+    try {
+      const data = await apiFetch('/signup', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email, phone, password, firstname, lastname, birthday, country, state })
+      });
+      if(data.token) {
+        saveToken(data.token);
+        loadUserData();
+      } else {
+        showError(data.error || 'Signup failed');
+      }
+    } catch(e) {
+      showError(e.message);
+    }
+  }
+
+  async function login() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    if (!email || !password) return showError('Email and password required.');
+
+    try {
+      const data = await apiFetch('/login', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email, password})
+      });
+      if(data.token) {
+        saveToken(data.token);
+        loadUserData();
+      } else {
+        showError(data.error || 'Login failed');
+      }
+    } catch(e) {
+      showError(e.message);
+    }
+  }
+
+  async function loadUserData() {
+    try {
+      const data = await apiFetch('/me');
+      if (data.email) {
+        document.getElementById('user-name').textContent = data.firstname || data.email;
+        document.getElementById('balance').textContent = data.balance;
+        document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('user-section').classList.remove('hidden');
+        showMessage('');
+        showError('');
+      } else {
+        logout();
+      }
+    } catch(e) {
+      logout();
+      showError('Session expired. Please login again.');
+    }
+  }
+
+  async function submitSurvey() {
+    const answer = document.getElementById('survey-answer').value;
+    if (!answer) return showError('Please select an answer.');
+
+    try {
+      const data = await apiFetch('/survey', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ answer })
+      });
+      if (data.success) {
+        showMessage(data.message);
+        document.getElementById('balance').textContent = data.balance;
+      } else {
+        showError(data.error || 'Survey submission failed.');
+      }
+    } catch(e) {
+      showError(e.message);
+    }
+  }
+
+  async function withdraw() {
+    const amount = parseInt(document.getElementById('withdraw-amount').value, 10);
+    const paypalEmail = document.getElementById('withdraw-paypal').value.trim();
+    if (!amount || amount < 50) return showError('Minimum withdrawal is 50 TechCoins.');
+    if (!paypalEmail) return showError('Please enter your PayPal email.');
+
+    try {
+      const data = await apiFetch('/withdraw', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ amount, paypalEmail })
+      });
+      if (data.success) {
+        showMessage(data.message);
+        document.getElementById('balance').textContent = data.balance;
+      } else {
+        showError(data.error || 'Withdrawal failed.');
+      }
+    } catch(e) {
+      showError(e.message);
+    }
+  }
+
+  function logout() {
+    clearToken();
+    document.getElementById('auth-section').classList.remove('hidden');
+    document.getElementById('user-section').classList.add('hidden');
+    showMessage('');
+    showError('');
+  }
+
+  document.getElementById('signup-btn').onclick = signup;
+  document.getElementById('login-btn').onclick = login;
+  document.getElementById('submit-survey-btn').onclick = submitSurvey;
+  document.getElementById('withdraw-btn').onclick = withdraw;
+  document.getElementById('logout-btn').onclick = logout;
+
+  // On page load, check token
+  window.onload = () => {
+    if (loadToken()) {
+      loadUserData();
+    }
+  };
+</script>
+
+</body>
+</html>
