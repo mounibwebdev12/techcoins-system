@@ -138,8 +138,8 @@ $result = $conn->query("SELECT * FROM transactions ORDER BY id DESC");
 
 <!-- paypal_config.php -->
 <?php
-$paypal_client_id = "YOUR_CLIENT_ID";
-$paypal_secret = "YOUR_SECRET_KEY";
+$paypal_client_id = "AcKNQugfH6LQ7ApKcATgXGjvRcnZgCwg17pJeHVI4Iu2RXLzDrl5c7q22zYY-sVtr417SPImLGCjnqYN";
+$paypal_secret = EAbCP8nqoRoS6YDEF2yXUwG_qS9_jG23_5j1RJbpWjZjzIcTP8x1nXzNUjIN2HwyPNaNMDZ0B7mIRaBm"";
 ?>
 
 <!-- database.php -->
